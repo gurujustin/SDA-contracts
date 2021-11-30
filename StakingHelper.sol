@@ -90,18 +90,18 @@ interface IStaking {
 contract StakingHelper {
 
     address public immutable staking;
-    address public immutable SND;
+    address public immutable SDA;
 
-    constructor ( address _staking, address _SND ) {
+    constructor ( address _staking, address _SDA ) {
         require( _staking != address(0) );
         staking = _staking;
-        require( _SND != address(0) );
-        SND = _SND;
+        require( _SDA != address(0) );
+        SDA = _SDA;
     }
 
     function stake( uint _amount, address _recipient ) external {
-        IERC20( SND ).transferFrom( msg.sender, address(this), _amount );
-        IERC20( SND ).approve( staking, _amount );
+        IERC20( SDA ).transferFrom( msg.sender, address(this), _amount );
+        IERC20( SDA ).approve( staking, _amount );
         IStaking( staking ).stake( _amount, _recipient );
         IStaking( staking ).claim( _recipient );
     }

@@ -340,7 +340,7 @@ contract Distributor is Policy {
     
     /* ====== VARIABLES ====== */
 
-    address public immutable SND;
+    address public immutable SDA;
     address public immutable treasury;
     
     uint public immutable epochLength;
@@ -367,11 +367,11 @@ contract Distributor is Policy {
     
     /* ====== CONSTRUCTOR ====== */
 
-    constructor( address _treasury, address _snd, uint _epochLength, uint _nextEpochBlock ) {        
+    constructor( address _treasury, address _sda, uint _epochLength, uint _nextEpochBlock ) {        
         require( _treasury != address(0) );
         treasury = _treasury;
-        require( _snd != address(0) );
-        SND = _snd;
+        require( _sda != address(0) );
+        SDA = _sda;
         epochLength = _epochLength;
         nextEpochBlock = _nextEpochBlock;
     }
@@ -437,7 +437,7 @@ contract Distributor is Policy {
         @return uint
      */
     function nextRewardAt( uint _rate ) public view returns ( uint ) {
-        return IERC20( SND ).totalSupply().mul( _rate ).div( 1000000 );
+        return IERC20( SDA ).totalSupply().mul( _rate ).div( 1000000 );
     }
 
     /**

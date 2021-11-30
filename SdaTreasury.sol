@@ -196,7 +196,7 @@ interface IERC20Mintable {
   function mint( address account_, uint256 ammount_ ) external;
 }
 
-interface ISNDERC20 {
+interface ISDAERC20 {
     function burnFrom(address account_, uint256 amount_) external;
 }
 
@@ -204,7 +204,7 @@ interface IBondCalculator {
   function valuation( address pair_, uint amount_ ) external view returns ( uint _value );
 }
 
-contract SndTreasury is Ownable {
+contract SdaTreasury is Ownable {
 
     using SafeMath for uint;
     using SafeERC20 for IERC20;
@@ -220,9 +220,9 @@ contract SndTreasury is Ownable {
     event ChangeQueued( MANAGING indexed managing, address queued );
     event ChangeActivated( MANAGING indexed managing, address activated, bool result );
 
-    enum MANAGING { RESERVEDEPOSITOR, RESERVESPENDER, RESERVETOKEN, RESERVEMANAGER, LIQUIDITYDEPOSITOR, LIQUIDITYTOKEN, LIQUIDITYMANAGER, DEBTOR, REWARDMANAGER, SSND }
+    enum MANAGING { RESERVEDEPOSITOR, RESERVESPENDER, RESERVETOKEN, RESERVEMANAGER, LIQUIDITYDEPOSITOR, LIQUIDITYTOKEN, LIQUIDITYMANAGER, DEBTOR, REWARDMANAGER, SSDA }
 
-    address public immutable SND;
+    address public immutable SDA;
     uint public immutable blocksNeededForQueue;
 
     address[] public reserveTokens; // Push only, beware false-positives.
@@ -264,19 +264,19 @@ contract SndTreasury is Ownable {
     mapping( address => bool ) public isRewardManager;
     mapping( address => uint ) public rewardManagerQueue; // Delays changes to mapping.
 
-    address public sSND;
-    uint public sSNDQueue; // Delays change to sSND address
+    address public sSDA;
+    uint public sSDAQueue; // Delays change to sSDA address
     
     uint public totalReserves; // Risk-free value of all assets
     uint public totalDebt;
 
     constructor (
-        address _SND,
+        address _SDA,
         address _DAI,
         uint _blocksNeededForQueue
     ) {
-        require( _SND != address(0) );
-        SND = _SND;
+        require( _SDA != address(0) );
+        SDA = _SDA;
 
         isReserveToken[ _DAI ] = true;
         reserveTokens.push( _DAI );
@@ -285,7 +285,7 @@ contract SndTreasury is Ownable {
     }
 
     /**
-        @notice allow approved address to deposit an asset for SND
+        @notice allow approved address to deposit an asset for SDA
         @param _amount uint
         @param _token address
         @param _profit uint
@@ -302,9 +302,9 @@ contract SndTreasury is Ownable {
         }
 
         uint value = valueOf(_token, _amount);
-        // mint SND needed and store amount of rewards for distribution
+        // mint SDA needed and store amount of rewards for distribution
         send_ = value.sub( _profit );
-        IERC20Mintable( SND ).mint( msg.sender, send_ );
+        IERC20Mintable( SDA ).mint( msg.sender, send_ );
 
         totalReserves = totalReserves.add( value );
         emit ReservesUpdated( totalReserves );
@@ -313,7 +313,7 @@ contract SndTreasury is Ownable {
     }
 
     /**
-        @notice allow approved address to burn SND for reserves
+        @notice allow approved address to burn SDA for reserves
         @param _amount uint
         @param _token address
      */
@@ -322,7 +322,7 @@ contract SndTreasury is Ownable {
         require( isReserveSpender[ msg.sender ] == true, "Not approved" );
 
         uint value = valueOf( _token, _amount );
-        ISNDERC20( SND ).burnFrom( msg.sender, value );
+        ISDAERC20( SDA ).burnFrom( msg.sender, value );
 
         totalReserves = totalReserves.sub( value );
         emit ReservesUpdated( totalReserves );
@@ -343,7 +343,7 @@ contract SndTreasury is Ownable {
 
         uint value = valueOf( _token, _amount );
 
-        uint maximumDebt = IERC20( sSND ).balanceOf( msg.sender ); // Can only borrow against sSND held
+        uint maximumDebt = IERC20( sSDA ).balanceOf( msg.sender ); // Can only borrow against sSDA held
         uint availableDebt = maximumDebt.sub( debtorBalance[ msg.sender ] );
         require( value <= availableDebt, "Exceeds debt limit" );
 
@@ -380,18 +380,18 @@ contract SndTreasury is Ownable {
     }
 
     /**
-        @notice allow approved address to repay borrowed reserves with SND
+        @notice allow approved address to repay borrowed reserves with SDA
         @param _amount uint
      */
-    function repayDebtWithSND( uint _amount ) external {
+    function repayDebtWithSDA( uint _amount ) external {
         require( isDebtor[ msg.sender ], "Not approved" );
 
-        ISNDERC20( SND ).burnFrom( msg.sender, _amount );
+        ISDAERC20( SDA ).burnFrom( msg.sender, _amount );
 
         debtorBalance[ msg.sender ] = debtorBalance[ msg.sender ].sub( _amount );
         totalDebt = totalDebt.sub( _amount );
 
-        emit RepayDebt( msg.sender, SND, _amount, _amount );
+        emit RepayDebt( msg.sender, SDA, _amount, _amount );
     }
 
     /**
@@ -424,7 +424,7 @@ contract SndTreasury is Ownable {
         require( isRewardManager[ msg.sender ], "Not approved" );
         require( _amount <= excessReserves(), "Insufficient reserves" );
 
-        IERC20Mintable( SND ).mint( _recipient, _amount );
+        IERC20Mintable( SDA ).mint( _recipient, _amount );
 
         emit RewardsMinted( msg.sender, _recipient, _amount );
     } 
@@ -434,7 +434,7 @@ contract SndTreasury is Ownable {
         @return uint
      */
     function excessReserves() public view returns ( uint ) {
-        return totalReserves.sub( IERC20( SND ).totalSupply().sub( totalDebt ) );
+        return totalReserves.sub( IERC20( SDA ).totalSupply().sub( totalDebt ) );
     }
 
     /**
@@ -459,15 +459,15 @@ contract SndTreasury is Ownable {
     }
 
     /**
-        @notice returns SND valuation of asset
+        @notice returns SDA valuation of asset
         @param _token address
         @param _amount uint
         @return value_ uint
      */
     function valueOf( address _token, uint _amount ) public view returns ( uint value_ ) {
         if ( isReserveToken[ _token ] ) {
-            // convert amount to match SND decimals
-            value_ = _amount.mul( 10 ** IERC20( SND ).decimals() ).div( 10 ** IERC20( _token ).decimals() );
+            // convert amount to match SDA decimals
+            value_ = _amount.mul( 10 ** IERC20( SDA ).decimals() ).div( 10 ** IERC20( _token ).decimals() );
         } else if ( isLiquidityToken[ _token ] ) {
             value_ = IBondCalculator( bondCalculator[ _token ] ).valuation( _token, _amount );
         }
@@ -499,8 +499,8 @@ contract SndTreasury is Ownable {
             debtorQueue[ _address ] = block.number.add( blocksNeededForQueue );
         } else if ( _managing == MANAGING.REWARDMANAGER ) { // 8
             rewardManagerQueue[ _address ] = block.number.add( blocksNeededForQueue );
-        } else if ( _managing == MANAGING.SSND ) { // 9
-            sSNDQueue = block.number.add( blocksNeededForQueue );
+        } else if ( _managing == MANAGING.SSDA ) { // 9
+            sSDAQueue = block.number.add( blocksNeededForQueue );
         } else return false;
 
         emit ChangeQueued( _managing, _address );
@@ -610,9 +610,9 @@ contract SndTreasury is Ownable {
             result = !isRewardManager[ _address ];
             isRewardManager[ _address ] = result;
 
-        } else if ( _managing == MANAGING.SSND ) { // 9
-            sSNDQueue = 0;
-            sSND = _address;
+        } else if ( _managing == MANAGING.SSDA ) { // 9
+            sSDAQueue = 0;
+            sSDA = _address;
             result = true;
 
         } else return false;

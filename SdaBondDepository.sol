@@ -610,7 +610,7 @@ interface IStakingHelper {
     function stake( uint _amount, address _recipient ) external;
 }
 
-contract SndBondDepository is Ownable {
+contract SdaBondDepository is Ownable {
 
     using FixedPoint for *;
     using SafeERC20 for IERC20;
@@ -631,9 +631,9 @@ contract SndBondDepository is Ownable {
 
     /* ======== STATE VARIABLES ======== */
 
-    address public immutable SND; // token given as payment for bond
+    address public immutable SDA; // token given as payment for bond
     address public immutable principle; // token used to create bond
-    address public immutable treasury; // mints SND when receives principle
+    address public immutable treasury; // mints SDA when receives principle
     address public immutable DAO; // receives profit share from bond
 
     bool public immutable isLiquidityBond; // LP and Reserve bonds are treated slightly different
@@ -668,7 +668,7 @@ contract SndBondDepository is Ownable {
 
     // Info for bond holder
     struct Bond {
-        uint payout; // SND remaining to be paid
+        uint payout; // SDA remaining to be paid
         uint vesting; // Blocks left to vest
         uint lastBlock; // Last interaction
         uint pricePaid; // In DAI, for front end viewing
@@ -689,14 +689,14 @@ contract SndBondDepository is Ownable {
     /* ======== INITIALIZATION ======== */
 
     constructor ( 
-        address _SND,
+        address _SDA,
         address _principle,
         address _treasury, 
         address _DAO, 
         address _bondCalculator
     ) {
-        require( _SND != address(0) );
-        SND = _SND;
+        require( _SDA != address(0) );
+        SDA = _SDA;
         require( _principle != address(0) );
         principle = _principle;
         require( _treasury != address(0) );
@@ -836,7 +836,7 @@ contract SndBondDepository is Ownable {
         uint value = ITreasury( treasury ).valueOf( principle, _amount );
         uint payout = payoutFor( value ); // payout to bonder is computed
 
-        require( payout >= 10000000, "Bond too small" ); // must be > 0.01 SND ( underflow protection )
+        require( payout >= 10000000, "Bond too small" ); // must be > 0.01 SDA ( underflow protection )
         require( payout <= maxPayout(), "Bond too large"); // size protection because there is no slippage
 
         // profits are calculated
@@ -846,14 +846,14 @@ contract SndBondDepository is Ownable {
         /**
             principle is transferred in
             approved and
-            deposited into the treasury, returning (_amount - profit) SND
+            deposited into the treasury, returning (_amount - profit) SDA
          */
         IERC20( principle ).safeTransferFrom( msg.sender, address(this), _amount );
         IERC20( principle ).approve( address( treasury ), _amount );
         ITreasury( treasury ).deposit( _amount, principle, profit );
         
         if ( fee != 0 ) { // fee is transferred to dao 
-            IERC20( SND ).safeTransfer( DAO, fee ); 
+            IERC20( SDA ).safeTransfer( DAO, fee ); 
         }
         
         // total debt is increased
@@ -920,13 +920,13 @@ contract SndBondDepository is Ownable {
      */
     function stakeOrSend( address _recipient, bool _stake, uint _amount ) internal returns ( uint ) {
         if ( !_stake ) { // if user does not want to stake
-            IERC20( SND ).transfer( _recipient, _amount ); // send payout
+            IERC20( SDA ).transfer( _recipient, _amount ); // send payout
         } else { // if user wants to stake
             if ( useHelper ) { // use if staking warmup is 0
-                IERC20( SND ).approve( stakingHelper, _amount );
+                IERC20( SDA ).approve( stakingHelper, _amount );
                 IStakingHelper( stakingHelper ).stake( _amount, _recipient );
             } else {
-                IERC20( SND ).approve( staking, _amount );
+                IERC20( SDA ).approve( staking, _amount );
                 IStaking( staking ).stake( _amount, _recipient );
             }
         }
@@ -974,7 +974,7 @@ contract SndBondDepository is Ownable {
      *  @return uint
      */
     function maxPayout() public view returns ( uint ) {
-        return IERC20( SND ).totalSupply().mul( terms.maxPayout ).div( 100000 );
+        return IERC20( SDA ).totalSupply().mul( terms.maxPayout ).div( 100000 );
     }
 
     /**
@@ -1025,11 +1025,11 @@ contract SndBondDepository is Ownable {
 
 
     /**
-     *  @notice calculate current ratio of debt to SND supply
+     *  @notice calculate current ratio of debt to SDA supply
      *  @return debtRatio_ uint
      */
     function debtRatio() public view returns ( uint debtRatio_ ) {   
-        uint supply = IERC20( SND ).totalSupply();
+        uint supply = IERC20( SDA ).totalSupply();
         debtRatio_ = FixedPoint.fraction( 
             currentDebt().mul( 1e9 ), 
             supply
@@ -1087,7 +1087,7 @@ contract SndBondDepository is Ownable {
     }
 
     /**
-     *  @notice calculate amount of SND available for claim by depositor
+     *  @notice calculate amount of SDA available for claim by depositor
      *  @param _depositor address
      *  @return pendingPayout_ uint
      */
@@ -1108,11 +1108,11 @@ contract SndBondDepository is Ownable {
     /* ======= AUXILLIARY ======= */
 
     /**
-     *  @notice allow anyone to send lost tokens (excluding principle or SND) to the DAO
+     *  @notice allow anyone to send lost tokens (excluding principle or SDA) to the DAO
      *  @return bool
      */
     function recoverLostToken( address _token ) external returns ( bool ) {
-        require( _token != SND );
+        require( _token != SDA );
         require( _token != principle );
         IERC20( _token ).safeTransfer( DAO, IERC20( _token ).balanceOf( address(this) ) );
         return true;

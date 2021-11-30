@@ -328,7 +328,7 @@ interface ITreasury {
     function mintRewards( address _recipient, uint _amount ) external;
 }
 
-interface ISSND{
+interface ISSDA{
     function circulatingSupply() external view returns ( uint );
 }
 
@@ -340,17 +340,17 @@ contract MigrateDistributor is Policy {
     
     /* ====== VARIABLES ====== */
 
-    address public immutable SND;
+    address public immutable SDA;
     address public immutable treasury;
     
     uint public immutable epochLength;
     uint public nextEpochBlock;
     
     address public immutable oldStaking;
-    address public immutable sSndOld;
+    address public immutable sSdaOld;
     
     address public newStaking;
-    address public sSndNew;
+    address public sSdaNew;
     
     //mapping( uint => Adjust ) public adjustments;
     
@@ -377,19 +377,19 @@ contract MigrateDistributor is Policy {
     
     /* ====== CONSTRUCTOR ====== */
 
-    constructor( address _treasury, address _snd, uint _epochLength, uint _nextEpochBlock, address _oldStaking, address _sSndOld, address _newStaking, address _sSndNew ) {
+    constructor( address _treasury, address _sda, uint _epochLength, uint _nextEpochBlock, address _oldStaking, address _sSdaOld, address _newStaking, address _sSdaNew ) {
         require( _treasury != address(0) );
         treasury = _treasury;
-        require( _snd != address(0) );
-        SND = _snd;
+        require( _sda != address(0) );
+        SDA = _sda;
         require( _oldStaking != address(0) );
         oldStaking = _oldStaking;
-        require( _sSndOld != address(0) );
-        sSndOld = _sSndOld;
+        require( _sSdaOld != address(0) );
+        sSdaOld = _sSdaOld;
         require( _newStaking != address(0) );
         newStaking = _newStaking;
-        require( _sSndNew != address(0) );
-        sSndNew = _sSndNew;
+        require( _sSdaNew != address(0) );
+        sSdaNew = _sSdaNew;
         epochLength = _epochLength;
         nextEpochBlock = _nextEpochBlock;
     }
@@ -418,7 +418,7 @@ contract MigrateDistributor is Policy {
             }*/
             
             uint reward = nextRewardAt(rate);
-            uint oldReward= split(reward,ISSND(sSndOld).circulatingSupply(),ISSND(sSndNew).circulatingSupply());
+            uint oldReward= split(reward,ISSDA(sSdaOld).circulatingSupply(),ISSDA(sSdaNew).circulatingSupply());
             uint newReward=reward.sub(oldReward);
             if(oldReward>0){
                 ITreasury( treasury ).mintRewards(oldStaking,oldReward);
@@ -479,7 +479,7 @@ contract MigrateDistributor is Policy {
         @return uint
      */
     function nextRewardAt( uint _rate ) public view returns ( uint ) {
-        return IERC20( SND ).totalSupply().mul( _rate ).div( 1000000 );
+        return IERC20( SDA ).totalSupply().mul( _rate ).div( 1000000 );
     }
 
     /**
@@ -493,7 +493,7 @@ contract MigrateDistributor is Policy {
             return 0;
         }else{
             reward=nextRewardAt(rate);
-            uint oldReward = split(reward,ISSND(sSndOld).circulatingSupply(),ISSND(sSndNew).circulatingSupply());
+            uint oldReward = split(reward,ISSDA(sSdaOld).circulatingSupply(),ISSDA(sSdaNew).circulatingSupply());
             uint newReward = reward.sub(oldReward);
             if(_recipient==newStaking){
                 return newReward;
@@ -519,11 +519,11 @@ contract MigrateDistributor is Policy {
         rate=_rewardRate;
     }
     
-    function setNewStaking(address _newStaking, address _sSndNew) external onlyPolicy() {
+    function setNewStaking(address _newStaking, address _sSdaNew) external onlyPolicy() {
         require( _newStaking != address(0) );
         newStaking = _newStaking;
-        require( _sSndNew != address(0) );
-        sSndNew = _sSndNew;
+        require( _sSdaNew != address(0) );
+        sSdaNew = _sSdaNew;
     }
 
     /**

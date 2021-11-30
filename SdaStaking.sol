@@ -519,8 +519,8 @@ contract Ownable is IOwnable {
     }
 }
 
-interface IsSND {
-    function rebase( uint256 sndProfit_, uint epoch_) external returns (uint256);
+interface IsSDA {
+    function rebase( uint256 sdaProfit_, uint epoch_) external returns (uint256);
 
     function circulatingSupply() external view returns (uint256);
 
@@ -541,13 +541,13 @@ interface IDistributor {
     function distribute() external returns ( bool );
 }
 
-contract SndStaking is Ownable {
+contract SdaStaking is Ownable {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
-    address public immutable SND;
-    address public immutable sSND;
+    address public immutable SDA;
+    address public immutable sSDA;
 
     struct Epoch {
         uint length;
@@ -566,16 +566,16 @@ contract SndStaking is Ownable {
     uint public warmupPeriod;
     
     constructor ( 
-        address _SND, 
-        address _sSND, 
+        address _SDA, 
+        address _sSDA, 
         uint _epochLength,
         uint _firstEpochNumber,
         uint _firstEpochBlock
     ) {
-        require( _SND != address(0) );
-        SND = _SND;
-        require( _sSND != address(0) );
-        sSND = _sSND;
+        require( _SDA != address(0) );
+        SDA = _SDA;
+        require( _sSDA != address(0) );
+        sSDA = _sSDA;
         
         epoch = Epoch({
             length: _epochLength,
@@ -594,50 +594,50 @@ contract SndStaking is Ownable {
     mapping( address => Claim ) public warmupInfo;
 
     /**
-        @notice stake SND to enter warmup
+        @notice stake SDA to enter warmup
         @param _amount uint
         @return bool
      */
     function stake( uint _amount, address _recipient ) external returns ( bool ) {
         rebase();
         
-        IERC20( SND ).safeTransferFrom( msg.sender, address(this), _amount );
+        IERC20( SDA ).safeTransferFrom( msg.sender, address(this), _amount );
 
         Claim memory info = warmupInfo[ _recipient ];
         require( !info.lock, "Deposits for account are locked" );
 
         warmupInfo[ _recipient ] = Claim ({
             deposit: info.deposit.add( _amount ),
-            gons: info.gons.add( IsSND( sSND ).gonsForBalance( _amount ) ),
+            gons: info.gons.add( IsSDA( sSDA ).gonsForBalance( _amount ) ),
             expiry: epoch.number.add( warmupPeriod ),
             lock: false
         });
         
-        IERC20( sSND ).safeTransfer( warmupContract, _amount );
+        IERC20( sSDA ).safeTransfer( warmupContract, _amount );
         return true;
     }
 
     /**
-        @notice retrieve sSND from warmup
+        @notice retrieve sSDA from warmup
         @param _recipient address
      */
     function claim ( address _recipient ) public {
         Claim memory info = warmupInfo[ _recipient ];
         if ( epoch.number >= info.expiry && info.expiry != 0 ) {
             delete warmupInfo[ _recipient ];
-            IWarmup( warmupContract ).retrieve( _recipient, IsSND( sSND ).balanceForGons( info.gons ) );
+            IWarmup( warmupContract ).retrieve( _recipient, IsSDA( sSDA ).balanceForGons( info.gons ) );
         }
     }
 
     /**
-        @notice forfeit sSND in warmup and retrieve SND
+        @notice forfeit sSDA in warmup and retrieve SDA
      */
     function forfeit() external {
         Claim memory info = warmupInfo[ msg.sender ];
         delete warmupInfo[ msg.sender ];
 
-        IWarmup( warmupContract ).retrieve( address(this), IsSND( sSND ).balanceForGons( info.gons ) );
-        IERC20( SND ).safeTransfer( msg.sender, info.deposit );
+        IWarmup( warmupContract ).retrieve( address(this), IsSDA( sSDA ).balanceForGons( info.gons ) );
+        IERC20( SDA ).safeTransfer( msg.sender, info.deposit );
     }
 
     /**
@@ -648,7 +648,7 @@ contract SndStaking is Ownable {
     }
 
     /**
-        @notice redeem sSND for SND
+        @notice redeem sSDA for SDA
         @param _amount uint
         @param _trigger bool
      */
@@ -656,16 +656,16 @@ contract SndStaking is Ownable {
         if ( _trigger ) {
             rebase();
         }
-        IERC20( sSND ).safeTransferFrom( msg.sender, address(this), _amount );
-        IERC20( SND ).safeTransfer( msg.sender, _amount );
+        IERC20( sSDA ).safeTransferFrom( msg.sender, address(this), _amount );
+        IERC20( SDA ).safeTransfer( msg.sender, _amount );
     }
 
     /**
-        @notice returns the sSND index, which tracks rebase growth
+        @notice returns the sSDA index, which tracks rebase growth
         @return uint
      */
     function index() public view returns ( uint ) {
-        return IsSND( sSND ).index();
+        return IsSDA( sSDA ).index();
     }
 
     /**
@@ -674,7 +674,7 @@ contract SndStaking is Ownable {
     function rebase() public {
         if( epoch.endBlock <= block.number ) {
 
-            IsSND( sSND ).rebase( epoch.distribute, epoch.number );
+            IsSDA( sSDA ).rebase( epoch.distribute, epoch.number );
 
             epoch.endBlock = epoch.endBlock.add( epoch.length );
             epoch.number++;
@@ -684,7 +684,7 @@ contract SndStaking is Ownable {
             }
 
             uint balance = contractBalance();
-            uint staked = IsSND( sSND ).circulatingSupply();
+            uint staked = IsSDA( sSDA ).circulatingSupply();
 
             if( balance <= staked ) {
                 epoch.distribute = 0;
@@ -695,11 +695,11 @@ contract SndStaking is Ownable {
     }
 
     /**
-        @notice returns contract SND holdings, including bonuses provided
+        @notice returns contract SDA holdings, including bonuses provided
         @return uint
      */
     function contractBalance() public view returns ( uint ) {
-        return IERC20( SND ).balanceOf( address(this) ).add( totalBonus );
+        return IERC20( SDA ).balanceOf( address(this) ).add( totalBonus );
     }
 
     /**
@@ -709,7 +709,7 @@ contract SndStaking is Ownable {
     function giveLockBonus( uint _amount ) external {
         require( msg.sender == locker );
         totalBonus = totalBonus.add( _amount );
-        IERC20( sSND ).safeTransfer( locker, _amount );
+        IERC20( sSDA ).safeTransfer( locker, _amount );
     }
 
     /**
@@ -719,7 +719,7 @@ contract SndStaking is Ownable {
     function returnLockBonus( uint _amount ) external {
         require( msg.sender == locker );
         totalBonus = totalBonus.sub( _amount );
-        IERC20( sSND ).safeTransferFrom( locker, address(this), _amount );
+        IERC20( sSDA ).safeTransferFrom( locker, address(this), _amount );
     }
 
     enum CONTRACTS { DISTRIBUTOR, WARMUP, LOCKER }

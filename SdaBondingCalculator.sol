@@ -271,17 +271,17 @@ interface IBondingCalculator {
   function valuation( address pair_, uint amount_ ) external view returns ( uint _value );
 }
 
-contract SndBondingCalculator is IBondingCalculator {
+contract SdaBondingCalculator is IBondingCalculator {
 
     using FixedPoint for *;
     using SafeMath for uint;
     using SafeMath for uint112;
 
-    address public immutable SND;
+    address public immutable SDA;
 
-    constructor( address _SND ) {
-        require( _SND != address(0) );
-        SND = _SND;
+    constructor( address _SDA ) {
+        require( _SDA != address(0) );
+        SDA = _SDA;
     }
 
     function getKValue( address _pair ) public view returns( uint k_ ) {
@@ -311,11 +311,11 @@ contract SndBondingCalculator is IBondingCalculator {
         ( uint reserve0, uint reserve1, ) = IUniswapV2Pair( _pair ).getReserves();
 
         uint reserve;
-        if ( IUniswapV2Pair( _pair ).token0() == SND ) {
+        if ( IUniswapV2Pair( _pair ).token0() == SDA ) {
             reserve = reserve1;
         } else {
             reserve = reserve0;
         }
-        return reserve.mul( 2 * ( 10 ** IERC20( SND ).decimals() ) ).div( getTotalValue( _pair ) );
+        return reserve.mul( 2 * ( 10 ** IERC20( SDA ).decimals() ) ).div( getTotalValue( _pair ) );
     }
 }
