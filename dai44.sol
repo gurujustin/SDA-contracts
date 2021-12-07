@@ -1,7 +1,3 @@
-/**
- *Submitted for verification at FtmScan.com on 2021-11-24
-*/
-
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity 0.7.5;
 
