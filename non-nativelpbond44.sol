@@ -1,5 +1,19 @@
+/**
+ *Submitted for verification at Etherscan.io on 2021-10-24
+*/
+
+/**
+ *Submitted for verification at Etherscan.io on 2021-10-21
+*/
+
+/**
+ *Submitted for verification at Etherscan.io on 2021-10-03
+*/
+
 // SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity 0.7.5;
+
+// Contract logic @ line 607
 
 interface IOwnable {
   function policy() external view returns (address);
@@ -587,6 +601,7 @@ library FixedPoint {
 interface ITreasury {
     function deposit( uint _amount, address _token, uint _profit ) external returns ( uint send_ );
     function valueOf( address _token, uint _amount ) external view returns ( uint value_ );
+    function mintRewards( address _to, uint _amount ) external;
 }
 
 interface IBondCalculator {
@@ -599,12 +614,53 @@ interface IStaking {
     function claim( address _recipient ) external;
 }
 
+// interface IStakingHelper {
+//     function stake( uint _amount, address _recipient ) external;
+// }
+
 interface ISSDA {
     function gonsForBalance( uint amount ) external view returns ( uint );
     function balanceForGons( uint gons ) external view returns ( uint );
 }
 
-contract SdaBondStakeDepository is Ownable {
+interface AggregatorV3Interface {
+
+  function decimals() external view returns (uint8);
+  function description() external view returns (string memory);
+  function version() external view returns (uint256);
+
+  // getRoundData and latestRoundData should both raise "No data present"
+  // if they do not have data to report, instead of returning unset values
+  // which could be misinterpreted as actual reported values.
+  function getRoundData(uint80 _roundId)
+    external
+    view
+    returns (
+      uint80 roundId,
+      int256 answer,
+      uint256 startedAt,
+      uint256 updatedAt,
+      uint80 answeredInRound
+    );
+  function latestRoundData()
+    external
+    view
+    returns (
+      uint80 roundId,
+      int256 answer,
+      uint256 startedAt,
+      uint256 updatedAt,
+      uint80 answeredInRound
+    );
+}
+
+interface IUniswapV2Pair {
+    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
+    function token0() external view returns ( address );
+    function token1() external view returns ( address );
+}
+
+contract SdaBondDepository is Ownable {
 
     using FixedPoint for *;
     using SafeERC20 for IERC20;
@@ -625,16 +681,20 @@ contract SdaBondStakeDepository is Ownable {
 
     /* ======== STATE VARIABLES ======== */
 
-    address public immutable SDA; // intermediate reward token from treasury
+    address public immutable SDA; // token given as payment for bond
     address public immutable sSDA; // token given as payment for bond
     address public immutable principle; // token used to create bond
     address public immutable treasury; // mints SDA when receives principle
-    address public immutable DAO; // receives profit share from bond
+    address public immutable WETH;
 
-    bool public immutable isLiquidityBond; // LP and Reserve bonds are treated slightly different
     address public immutable bondCalculator; // calculates value of LP tokens
+    
+    AggregatorV3Interface internal priceFeed;
 
-    address public staking; // to stake and claim if no staking warmup
+    address public staking; // to auto-stake payout
+    address public stakingHelper; // to stake and claim if no staking warmup
+    address public pair;
+    bool public useHelper;
 
     Terms public terms; // stores terms for new bonds
     Adjust public adjustment; // stores adjustment to BCV data
@@ -643,10 +703,12 @@ contract SdaBondStakeDepository is Ownable {
 
     uint public totalDebt; // total value of outstanding bonds; used for pricing
     uint public lastDecay; // reference block for debt decay
-    
+
     uint public totalPrinciple; // total principle bonded through this depository
 
     string internal name_; //name of this bond
+
+
 
 
     /* ======== STRUCTS ======== */
@@ -657,13 +719,12 @@ contract SdaBondStakeDepository is Ownable {
         uint vestingTerm; // in blocks
         uint minimumPrice; // vs principle value
         uint maxPayout; // in thousandths of a %. i.e. 500 = 0.5%
-        uint fee; // as % of bond payout, in hundreths. ( 500 = 5% = 0.05 for every 1 paid)
         uint maxDebt; // 9 decimal debt ratio, max % total supply created as debt
     }
 
-    // Info for bond holder with gons
+    // Info for bond holder
     struct Bond {
-        uint gonsPayout; // sSDA gons remaining to be paid
+        uint gonsPayout; // SDA remaining to be paid
         uint sdaPayout; // sda amount at the moment of bond
         uint vesting; // Blocks left to vest
         uint lastBlock; // Last interaction
@@ -690,8 +751,10 @@ contract SdaBondStakeDepository is Ownable {
         address _sSDA,
         address _principle,
         address _treasury, 
-        address _DAO, 
-        address _bondCalculator
+        address _bondCalculator,
+        address _feed,
+        address _pair,
+        address _weth
     ) {
         require( _SDA != address(0) );
         SDA = _SDA;
@@ -701,11 +764,12 @@ contract SdaBondStakeDepository is Ownable {
         principle = _principle;
         require( _treasury != address(0) );
         treasury = _treasury;
-        require( _DAO != address(0) );
-        DAO = _DAO;
         // bondCalculator should be address(0) if not LP bond
         bondCalculator = _bondCalculator;
-        isLiquidityBond = ( _bondCalculator != address(0) );
+        priceFeed = AggregatorV3Interface( _feed );
+        require( _pair != address(0) );
+        pair = _pair; // pair address
+        WETH = _weth;
         name_ = _name;
     }
 
@@ -715,7 +779,6 @@ contract SdaBondStakeDepository is Ownable {
      *  @param _vestingTerm uint
      *  @param _minimumPrice uint
      *  @param _maxPayout uint
-     *  @param _fee uint
      *  @param _maxDebt uint
      *  @param _initialDebt uint
      */
@@ -724,16 +787,15 @@ contract SdaBondStakeDepository is Ownable {
         uint _vestingTerm,
         uint _minimumPrice,
         uint _maxPayout,
-        uint _fee,
         uint _maxDebt,
         uint _initialDebt
     ) external onlyPolicy() {
+        // require( terms.controlVariable == 0, "Bonds must be initialized from 0" );
         terms = Terms ({
             controlVariable: _controlVariable,
             vestingTerm: _vestingTerm,
             minimumPrice: _minimumPrice,
             maxPayout: _maxPayout,
-            fee: _fee,
             maxDebt: _maxDebt
         });
         totalDebt = _initialDebt;
@@ -745,7 +807,7 @@ contract SdaBondStakeDepository is Ownable {
     
     /* ======== POLICY FUNCTIONS ======== */
 
-    enum PARAMETER { VESTING, PAYOUT, FEE, DEBT, MINPRICE }
+    enum PARAMETER { VESTING, PAYOUT, DEBT, MINPRICE }
     /**
      *  @notice set parameters for new bonds
      *  @param _parameter PARAMETER
@@ -753,14 +815,11 @@ contract SdaBondStakeDepository is Ownable {
      */
     function setBondTerms ( PARAMETER _parameter, uint _input ) external onlyPolicy() {
         if ( _parameter == PARAMETER.VESTING ) { // 0
-            require( _input >= 10000, "Vesting must be longer than 3 hours" );
+            require( _input >= 10000, "Vesting must be longer than 36 hours" );
             terms.vestingTerm = _input;
         } else if ( _parameter == PARAMETER.PAYOUT ) { // 1
             require( _input <= 1000, "Payout cannot be above 1 percent" );
             terms.maxPayout = _input;
-        } else if ( _parameter == PARAMETER.FEE ) { // 2
-            require( _input <= 10000, "DAO fee cannot exceed payout" );
-            terms.fee = _input;
         } else if ( _parameter == PARAMETER.DEBT ) { // 3
             terms.maxDebt = _input;
         } else if ( _parameter == PARAMETER.MINPRICE ) { // 4
@@ -775,12 +834,14 @@ contract SdaBondStakeDepository is Ownable {
      *  @param _target uint
      *  @param _buffer uint
      */
-    function setAdjustment (
+    function setAdjustment ( 
         bool _addition,
         uint _increment, 
         uint _target,
         uint _buffer 
     ) external onlyPolicy() {
+        // require( _increment <= terms.controlVariable.mul( 25 ).div( 1000 ), "Increment too large" );
+
         adjustment = Adjust({
             add: _addition,
             rate: _increment,
@@ -793,10 +854,17 @@ contract SdaBondStakeDepository is Ownable {
     /**
      *  @notice set contract for auto stake
      *  @param _staking address
+     *  @param _helper bool
      */
-    function setStaking( address _staking) external onlyPolicy() {
+    function setStaking( address _staking, bool _helper ) external onlyPolicy() {
         require( _staking != address(0) );
-        staking = _staking;
+        if ( _helper ) {
+            useHelper = true;
+            stakingHelper = _staking;
+        } else {
+            useHelper = false;
+            staking = _staking;
+        }
     }
 
 
@@ -822,7 +890,7 @@ contract SdaBondStakeDepository is Ownable {
         require( totalDebt <= terms.maxDebt, "Max capacity reached" );
         
         uint priceInUSD = bondPriceInUSD(); // Stored in bond info
-        //uint nativePrice = _bondPrice();
+        // uint nativePrice = _bondPrice();
 
         require( _maxPrice >= _bondPrice(), "Slippage limit: more than max price" ); // slippage protection
 
@@ -832,38 +900,29 @@ contract SdaBondStakeDepository is Ownable {
         require( payout >= 10000000, "Bond too small" ); // must be > 0.01 SDA ( underflow protection )
         require( payout <= maxPayout(), "Bond too large"); // size protection because there is no slippage
 
-        // profits are calculated
-        uint fee = payout.mul( terms.fee ).div( 10000 );
-        uint profit = value.sub( payout ).sub( fee );
-
         /**
-            principle is transferred in
-            approved and
-            deposited into the treasury, returning (_amount - profit) SDA
+            asset carries risk and is not minted against
+            asset transfered to treasury and rewards minted as payout
          */
-        IERC20( principle ).safeTransferFrom( msg.sender, address(this), _amount );
-        IERC20( principle ).approve( address( treasury ), _amount );
-        ITreasury( treasury ).deposit( _amount, principle, profit );
+        IERC20( principle ).safeTransferFrom( msg.sender, treasury, _amount );
+        ITreasury( treasury ).mintRewards( address(this), payout );
         
         totalPrinciple=totalPrinciple.add(_amount);
-        
-        if ( fee != 0 ) { // fee is transferred to dao 
-            IERC20( SDA ).safeTransfer( DAO, fee ); 
-        }
-        
+
         // total debt is increased
         totalDebt = totalDebt.add( value ); 
+
         //TODO
         //uint stakeAmount = totalBond.sub(fee);
         IERC20( SDA ).approve( staking, payout );
         IStaking( staking ).stake( payout, address(this) );
         IStaking( staking ).claim( address(this) );
         uint stakeGons=ISSDA(sSDA).gonsForBalance(payout);
-
+                
         // depositor info is stored
         _bondInfo[ _depositor ] = Bond({ 
             gonsPayout: _bondInfo[ _depositor ].gonsPayout.add( stakeGons ),
-            sdaPayout: _bondInfo[ _depositor ].sdaPayout.add( payout ),
+            sdaPayout: _bondInfo[ _depositor ].payout.add( payout ),
             vesting: terms.vestingTerm,
             lastBlock: block.number,
             pricePaid: priceInUSD
@@ -878,16 +937,16 @@ contract SdaBondStakeDepository is Ownable {
     }
 
     /** 
-     *  @notice redeem bond for user, keep the parameter bool _stake for compatibility of redeem helper
+     *  @notice redeem bond for user
      *  @param _recipient address
      *  @param _stake bool
      *  @return uint
      */ 
-    function redeem( address _recipient, bool _stake) external returns ( uint ) {        
+    function redeem( address _recipient, bool _stake ) external returns ( uint ) {        
         Bond memory info = _bondInfo[ _recipient ];
         uint percentVested = percentVestedFor( _recipient ); // (blocks since last interaction / vesting term remaining)
 
-        require ( percentVested >= 10000 ,"not yet fully vested") ; // if fully vested
+        require ( percentVested >= 10000, "not yet fully vested" ); // if fully vested
         delete _bondInfo[ _recipient ]; // delete user info
         uint _amount = ISSDA(sSDA).balanceForGons(info.gonsPayout);
         emit BondRedeemed( _recipient, _amount, 0 ); // emit bond data
@@ -899,6 +958,7 @@ contract SdaBondStakeDepository is Ownable {
 
     
     /* ======== INTERNAL HELPER FUNCTIONS ======== */
+
 
     /**
      *  @notice makes incremental adjustment to control variable
@@ -950,16 +1010,15 @@ contract SdaBondStakeDepository is Ownable {
      *  @return uint
      */
     function payoutFor( uint _value ) public view returns ( uint ) {
-        return FixedPoint.fraction( _value, bondPrice() ).decode112with18().div( 1e16 );
+        return FixedPoint.fraction( _value, bondPrice() ).decode112with18().div( 1e14 );
     }
-
 
     /**
      *  @notice calculate current bond premium
      *  @return price_ uint
      */
     function bondPrice() public view returns ( uint price_ ) {        
-        price_ = terms.controlVariable.mul( debtRatio() ).add( 1000000000 ).div( 1e7 );
+        price_ = terms.controlVariable.mul( debtRatio() ).div( 1e5 );
         if ( price_ < terms.minimumPrice ) {
             price_ = terms.minimumPrice;
         }
@@ -970,12 +1029,41 @@ contract SdaBondStakeDepository is Ownable {
      *  @return price_ uint
      */
     function _bondPrice() internal returns ( uint price_ ) {
-        price_ = terms.controlVariable.mul( debtRatio() ).add( 1000000000 ).div( 1e7 );
+        price_ = terms.controlVariable.mul( debtRatio() ).div( 1e5 );
         if ( price_ < terms.minimumPrice ) {
             price_ = terms.minimumPrice;        
         } else if ( terms.minimumPrice != 0 ) {
             terms.minimumPrice = 0;
         }
+    }
+    
+    /**
+     *  @notice get asset price from chainlink
+     */
+    function assetPrice() public view returns (uint) {
+        ( , uint price, , , ) = priceFeed.latestRoundData();
+        (uint reserve0, uint reserve1, ) = IUniswapV2Pair( pair ).getReserves();
+        uint weth_decimal = IERC20(WETH).decimals();
+        
+        if(IUniswapV2Pair(pair).token0() == WETH) {
+            uint token_decimal = IERC20(IUniswapV2Pair(pair).token1()).decimals();
+            if(weth_decimal > token_decimal) {
+                price = (price * reserve0 / reserve1) / 10 ** (weth_decimal - token_decimal);
+            }
+            else {
+                price = price * reserve0 * 10 ** (token_decimal - weth_decimal) / reserve1;
+            }
+        }
+        else if(IUniswapV2Pair(pair).token1() == WETH) {
+            uint token_decimal = IERC20(IUniswapV2Pair(pair).token0()).decimals();
+            if(weth_decimal > token_decimal) {
+                price = (price * reserve1 / reserve0) / 10 ** (weth_decimal - token_decimal);
+            }
+            else {
+                price = price * reserve1 * 10 ** (token_decimal - weth_decimal) / reserve0;
+            }
+        }
+        return price;
     }
 
     /**
@@ -983,13 +1071,13 @@ contract SdaBondStakeDepository is Ownable {
      *  @return price_ uint
      */
     function bondPriceInUSD() public view returns ( uint price_ ) {
-        if( isLiquidityBond ) {
-            price_ = bondPrice().mul( IBondCalculator( bondCalculator ).markdown( principle ) ).div( 100 );
-        } else {
-            price_ = bondPrice().mul( 10 ** IERC20( principle ).decimals() ).div( 100 );
-        }
+        price_ = bondPrice()
+                    .mul( IBondCalculator( bondCalculator ).markdown( principle ) )
+                    .mul( uint( assetPrice() ) )
+                    .div( 1e12 );
     }
-    
+
+
     /**
      *  @notice return bond info with latest sSDA balance calculated from gons
      *  @param _depositor address
@@ -1006,16 +1094,14 @@ contract SdaBondStakeDepository is Ownable {
         pricePaid=info.pricePaid;
     }
 
-
     /**
      *  @notice calculate current ratio of debt to SDA supply
      *  @return debtRatio_ uint
      */
     function debtRatio() public view returns ( uint debtRatio_ ) {   
-        uint supply = IERC20( SDA ).totalSupply();
         debtRatio_ = FixedPoint.fraction( 
             currentDebt().mul( 1e9 ), 
-            supply
+            IERC20( SDA ).totalSupply()
         ).decode112with18().div( 1e18 );
     }
 
@@ -1024,11 +1110,7 @@ contract SdaBondStakeDepository is Ownable {
      *  @return uint
      */
     function standardizedDebtRatio() external view returns ( uint ) {
-        if ( isLiquidityBond ) {
-            return debtRatio().mul( IBondCalculator( bondCalculator ).markdown( principle ) ).div( 1e9 );
-        } else {
-            return debtRatio();
-        }
+        return debtRatio().mul( IBondCalculator( bondCalculator ).markdown( principle ) ).div( 1e9 );
     }
 
     /**
@@ -1083,30 +1165,5 @@ contract SdaBondStakeDepository is Ownable {
         } else {
             pendingPayout_ = 0;
         }
-    }
-    
-    /**
-     *  @notice show the name of current bond
-     *  @return _name string
-     */
-    function name() public view returns (string memory _name) {
-        return name_;
-    }
-
-
-
-
-    /* ======= AUXILLIARY ======= */
-
-    /**
-     *  @notice allow anyone to send lost tokens (excluding principle or SDA) to the DAO
-     *  @return bool
-     */
-    function recoverLostToken( address _token ) external returns ( bool ) {
-        require( _token != SDA );
-        require( _token != sSDA );
-        require( _token != principle );
-        IERC20( _token ).safeTransfer( DAO, IERC20( _token ).balanceOf( address(this) ) );
-        return true;
     }
 }
