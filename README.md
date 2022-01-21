@@ -1,3 +1,3 @@
 # Sda-contracts
 
-contracts of StandardDAO
+contracts of Standard DAO
